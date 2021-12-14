@@ -30,22 +30,21 @@ def get_preprocess_func(env_name):
     elif "Pacman" in env_name:
         return _preprocess_mspackman
     else:
-        raise NotImplementedError(
-            f"Frame processor not implemeted for {env_name}")
+        raise NotImplementedError(f"Frame processor not implemeted for {env_name}")
 
 
-def _preprocess_breakout(frame):
+def _preprocess_breakout(frame, resize=84):
     
     image = Image.fromarray(frame)
-    image = image.convert("L").crop((0, 34, 160, 200)).resize((84, 84))
+    image = image.convert("L").crop((0, 34, 160, 200)).resize((resize, resize))
     image_scaled = np.array(image) / 255.0
     return image_scaled.astype(np.float32)
 
 
-def _preprocess_mspackman(frame):
+def _preprocess_mspackman(frame, resize=84):
     
     image = Image.fromarray(frame)
-    image = image.convert("L").crop((0, 0, 160, 170)).resize((84, 84))
+    image = image.convert("L").crop((0, 0, 160, 170)).resize((resize, resize))
     image_scaled = np.array(image) / 255.0
     return image_scaled.astype(np.float32)
 
@@ -56,8 +55,8 @@ def get_initial_lives(env_name):
     elif "Pacman" in env_name:
         return 3
     else:
-        raise NotImplementedError(
-            f"Frame processor not implemeted for {env_name}")
+        raise NotImplementedError(f"Frame processor not implemeted for {env_name}")
+
 
 def seed_evrything(seed):
     random.seed(seed)
@@ -65,15 +64,13 @@ def seed_evrything(seed):
     torch.manual_seed(seed)
     torch.cuda.manual_seed(seed)
     
-
+    
 def create_beta_list(num_arms, beta=0.3):
     
     betas = [torch.tensor(0)]
     for i in range(1, num_arms-1):
-        betas.append(beta * torch.sigmoid(torch.tensor(10 * (2 * i / (num_arms-2) - 1))))
-        
+        betas.append(beta * torch.sigmoid(torch.tensor(10 * (2*i / (num_arms-2) - 1))))
     betas.append(torch.tensor(beta))
-    
     return betas
 
 
@@ -81,12 +78,13 @@ def create_gamma_list(num_arms, gamma0=0.9999, gamma1=0.997, gamma2=0.99):
     
     gammas = [torch.tensor(gamma0)]
     for i in range(1, 7):
-        gammas.append(gamma1 + (gamma0 - gamma1) * torch.sigmoid(torch.tensor(10 * (i - 3) / 3)))
+        gammas.append(gamma0 + (gamma1 - gamma0) * torch.sigmoid(torch.tensor(10 * (i - 3) / 3)))
     gammas.append(torch.tensor(gamma1))
     
     for i in range(8, num_arms):
-        gammas.append(1 - torch.exp(torch.log(torch.tensor(1-gamma1)) + ((i-8) * torch.log(torch.tensor(1-gamma2))) / (num_arms-9)))
-        
+        t = (num_arms-i-1) * torch.log(torch.tensor(1-gamma1)) + (i-8) * torch.log(torch.tensor(1-gamma2))
+        gammas.append(1 - torch.exp(t / (num_arms-9)))
+    
     return gammas
 
 
@@ -113,8 +111,8 @@ class UCB:
                 for j, reward in self.data:
                     N[j] += 1
                     mu[j] += reward
-                mu = mu / N
-                index = np.argmax(mu + self.beta * np.sqrt(1 / (N + 1e-5)))
+                mu = mu / (N + 1e-10)
+                index = np.argmax(mu + self.beta * np.sqrt(1 / (N + 1e-6)))
                 
             else:
                 index = np.random.choice(self.num_arms)
@@ -133,7 +131,7 @@ def get_episodic_reward(x, M, k, c=0.001, epsilon=0.0001, cluster_distance=0.008
     dm = np.mean(topk_dist_list) 
     
     if dm == 0:
-        return 0
+        return 1e-10
     else:
         topk_dist_list = topk_dist_list / dm
         topk_dist_list = np.where(topk_dist_list-cluster_distance<0, 0, topk_dist_list-cluster_distance)
@@ -142,7 +140,7 @@ def get_episodic_reward(x, M, k, c=0.001, epsilon=0.0001, cluster_distance=0.008
     s = np.sqrt(np.sum(K)) + c
 
     if s > max_similarity:
-        return 0
+        return 1e-10
     else:
         return 1 / s
 
@@ -194,7 +192,7 @@ def play_episode(frame_process_func,
 
     lives = get_initial_lives(env_name)
     
-    M = []
+    M = collections.deque(maxlen=int(1e3))
     ucb_datas = []
     transitions = []
 
@@ -245,7 +243,7 @@ def play_episode(frame_process_func,
             std = np.std(error_list)
             avg = np.mean(error_list)
             
-        curiosity = 1 + (error - avg) / std
+        curiosity = 1 + (error - avg) / (std + 1e-10)
         
         # push data to Memory
         M.append(control_state)        

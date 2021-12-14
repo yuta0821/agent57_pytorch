@@ -13,12 +13,14 @@ class Tester:
 
     def __init__(self,
                  env_name,
-                 n_frames, num_arms,
+                 n_frames,
+                 num_arms,
                  L,
                  k,
                  window_size,
                  ucb_epsilon,
                  ucb_beta,
+                 switch_test_cycle,
                  original_lifelong_weight):
         
         self.env_name = env_name
@@ -27,27 +29,29 @@ class Tester:
         self.n_frames = n_frames
         self.action_space = self.env.action_space.n
 
-        self.in_q_network = QNetwork(self.action_space)
-        self.ex_q_network = QNetwork(self.action_space)
-        self.embedding_net = EmbeddingNet()
-        self.original_lifelong_net = LifeLongNet()
-        self.trained_lifelong_net = LifeLongNet()
+        self.in_q_network = QNetwork(self.action_space, n_frames)
+        self.ex_q_network = QNetwork(self.action_space, n_frames)
+        self.embedding_net = EmbeddingNet(n_frames)
+        self.original_lifelong_net = LifeLongNet(n_frames)
+        self.trained_lifelong_net = LifeLongNet(n_frames)
 
         self.ucb = UCB(num_arms, window_size, ucb_epsilon, ucb_beta)
         self.betas = create_beta_list(num_arms)
 
-        self.error_list = collections.deque(maxlen=int(1e5))
+        self.error_list = collections.deque(maxlen=int(1e4))
         self.L = L
         self.k = k
+        
+        self.switch_test_cycle = switch_test_cycle # 10
 
         self.original_lifelong_net.load_state_dict(original_lifelong_weight)
-        self.is_test = True
+        self.is_test = False
         self.count = 0
         
     
     def test_play(self, in_q_weight, ex_q_weight, embed_weight, lifelong_weight):
         
-        if self.count % 5 == 0:
+        if self.count % (self.switch_test_cycle//2) == 0:
             self.in_q_network.load_state_dict(in_q_weight)
             self.ex_q_network.load_state_dict(ex_q_weight)
             self.embedding_net.load_state_dict(embed_weight)
@@ -97,10 +101,10 @@ class Tester:
             self.ucb.push_data(ucb_datas)
             self.count += 1       
             
-        if self.count % 10 == 5:
+        if self.count % self.switch_test_cycle == (self.switch_test_cycle//2):
             self.is_test = True
             self.episode_reward = []
             
-        elif self.count % 10 == 0:
+        elif self.count % self.switch_test_cycle == 0:
             self.is_test = False
             return np.mean(self.episode_reward)

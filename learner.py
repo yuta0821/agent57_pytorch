@@ -22,28 +22,63 @@ class Learner:
     """
     update parameter
     Attributes:
-    
+      env_name             (str): name of environment
+      n_frames             (int): number of images to be stacked
+      env           (gym object): environment
+      action_space         (int): dim of action space
+      device      (torch.device): device to use
+      frame_process_func        : function to preprocess images
+      in_online_q_network       : online q network about intrinsic reward
+      in_target_q_network       : target q network about intrinsic reward
+      ex_online_q_network       : online q network about extrinsic reward
+      ex_target_q_network       : target q network about extrinsic reward
+      embedding_net             : embedding network to get episodic reward
+      embedding_classifier      : classify action based on embedding representation
+      original_lifelong_net     : lifelong network not to be trained
+      trained_lifelong_net      : lifelong network to be trained
+      in_q_optimizer            : optimizer of in_online_q_network
+      ex_q_optimizer            : optimizer of ex_online_q_network
+      embedding_optimizer       : optimizer of embedding_net
+      ex_q_optimizer            : optimizer of trained_lifelong_net
+      criterion                 : loss function of embedding classifier
+      betas               (list): list of beta which decide weights between intrinsic qvalues and extrinsic qvalues
+      gammas              (list): list of gamma which is discount rate
+      eta                (float): coefficient for priority caluclation
+      lamda              (float): coefficient for retrace operation
+      burnin_length        (int): length of burnin to calculate qvalues
+      unroll_length        (int): length of unroll to calculate qvalues
+      target_update_period (int): how often to update the target parameters
     """
-    def __init__(self, env_name,
+
+    def __init__(self,
+                 env_name,
                  n_frames,
                  eta,
                  lamda,
                  num_arms,
                  burnin_length,
                  unroll_length,
-                 target_update_period
-                 ):
+                 target_update_period,
+                 in_q_lr,
+                 ex_q_lr,
+                 embed_lr,
+                 lifelong_lr,
+                 in_q_clip_grad,
+                 ex_q_clip_grad,
+                 embed_clip_grad,
+                 lifelong_clip_grad):
         """
         Args:
-          env_name (str): name of environment
-          n_frames (int): number of images to be stacked
-          eta (float): coefficient for prioirty caluclation
-          lamda (float): coefficient for retrace operation
-          num_arms (int): number of multi arms
-          burnin_length (int): length of burnin to calculate qvalues
-          unroll_length (int): length of unroll to calculate qvalues
+          env_name             (str): name of environment
+          n_frames             (int): number of images to be stacked
+          eta                (float): coefficient for priority caluclation
+          lamda              (float): coefficient for retrace operation
+          num_arms             (int): number of multi arms
+          burnin_length        (int): length of burnin to calculate qvalues
+          unroll_length        (int): length of unroll to calculate qvalues
           target_update_period (int): how often to update the target parameters
         """
+
         
         self.env_name = env_name
         self.n_frames = n_frames
@@ -53,23 +88,28 @@ class Learner:
         self.frame_process_func = get_preprocess_func(env_name)
 
         # define network
-        self.in_online_q_network = QNetwork(self.action_space)
-        self.in_target_q_network = QNetwork(self.action_space)
-        self.ex_online_q_network = QNetwork(self.action_space)
-        self.ex_target_q_network = QNetwork(self.action_space)
+        self.in_online_q_network = QNetwork(self.action_space, n_frames)
+        self.in_target_q_network = QNetwork(self.action_space, n_frames)
+        self.ex_online_q_network = QNetwork(self.action_space, n_frames)
+        self.ex_target_q_network = QNetwork(self.action_space, n_frames)
         
-        self.embedding_net = EmbeddingNet()
+        self.embedding_net = EmbeddingNet(n_frames)
         self.embedding_classifier = EmbeddingClassifer(self.action_space)
         
-        self.original_lifelong_net = LifeLongNet()
-        self.trained_lifelong_net = LifeLongNet()
+        self.original_lifelong_net = LifeLongNet(n_frames)
+        self.trained_lifelong_net = LifeLongNet(n_frames)
         
         # set optimizer
-        self.in_q_optimizer = optim.Adam(self.in_online_q_network.parameters(), lr=1e-4)
-        self.ex_q_optimizer = optim.Adam(self.ex_online_q_network.parameters(), lr=1e-4)
-        self.embedding_optimizer = optim.Adam(self.embedding_net.parameters(), lr=5e-4)
-        self.lifelong_optimizer = optim.Adam(self.trained_lifelong_net.parameters(), lr=5e-4)
+        self.in_q_optimizer = optim.Adam(self.in_online_q_network.parameters(), lr=in_q_lr)
+        self.ex_q_optimizer = optim.Adam(self.ex_online_q_network.parameters(), lr=ex_q_lr)
+        self.embedding_optimizer = optim.Adam(self.embedding_net.parameters(), lr=embed_lr)
+        self.lifelong_optimizer = optim.Adam(self.trained_lifelong_net.parameters(), lr=lifelong_lr)
 
+        self.in_q_clip_grad = in_q_clip_grad
+        self.ex_q_clip_grad = ex_q_clip_grad
+        self.embed_clip_grad = embed_clip_grad
+        self.lifelong_clip_grad = lifelong_clip_grad
+        
         self.criterion = torch.nn.CrossEntropyLoss()
 
         self.betas = create_beta_list(num_arms)
@@ -85,6 +125,9 @@ class Learner:
     
     
     def set_device(self):
+        """
+        set network on device
+        """
               
         self.in_online_q_network.to(self.device)
         self.in_target_q_network.to(self.device)
@@ -96,6 +139,9 @@ class Learner:
         self.original_lifelong_net.to(self.device)
 
     def define_network(self):
+        """
+        define network and get initial parameter to copy to angents
+        """
 
         frame = self.frame_process_func(self.env.reset())
         frames = [frame] * self.n_frames
@@ -150,6 +196,12 @@ class Learner:
         return in_q_weight, ex_q_weight, embed_weight, trained_lifelong_weight, original_lifelong_weight
 
     def save(self, weight_dir, cycle):
+        """
+        save weight
+        Args:
+          weight_dir (str): path to weight directory
+          cycle      (int): the number of times the learning has been completed
+        """
 
         torch.save(self.online_q_network.state_dict(), os.path.join(weight_dir, f"q_weight_{cycle}.pth"))
         torch.save(self.online_policy_net.state_dict(), os.path.join(weight_dir, f"policy_weight_{cycle}.pth"))
@@ -160,6 +212,16 @@ class Learner:
 
     @staticmethod
     def decompress_segments(minibatch):
+        """
+        decompress minibatch to indices, weights, segments
+        Args:
+          minibatch: minibatch of indices, weights and segments
+        Returns:
+          indices : indices of experiences
+          weights : priorities of experiences
+          segments: a coherent body of experience of some length
+        """
+
         indices, weights, compressed_segments = minibatch
         segments = [pickle.loads(lz4f.decompress(compressed_seg))
                     for compressed_seg in compressed_segments]
@@ -167,13 +229,11 @@ class Learner:
 
     def update_network(self, minibatchs):
         """
+        update parameter of networks, generating losses.
         Args:
-            minibatchs (List[Tuple(indices, weights, segments)])
-                indices    (List[float]): indices of replay buffer
-                weights    (List[float]): Importance sampling weights
-                segments   (List[Segment]):
-                    Segment    sequence of transitions
+            minibatch: minibatch of indices, weights and segments
         """
+
         indices_all = []
         priorities_all = []
         in_q_losses = []
@@ -217,6 +277,12 @@ class Learner:
                 np.mean(in_q_losses), np.mean(ex_q_losses), np.mean(embed_losses), np.mean(lifelong_losses)
 
     def qnet_update(self, weights, segments):
+        """
+        update q network
+        Args:
+          weights : priorities of experiences
+          segments: a coherent body of experience of some length
+        """
 
         self.states, self.actions, self.in_rewards, self.ex_rewards, self.dones, self.j, self.next_states, in_h0, in_c0, ex_h0, ex_c0, \
             self.prev_in_rewards, self.prev_ex_rewards, self.prev_actions = segments2contents(segments, burnin_len=self.burnin_len, is_grad=True, device=self.device)
@@ -254,16 +320,13 @@ class Learner:
 
         in_Retraced_Q = self.get_retraced_Q(in_target_qvalues, self.in_rewards)
         ex_Retraced_Q = self.get_retraced_Q(ex_target_qvalues, self.ex_rewards)
-        
-        with open(f"log/learner_check.txt", mode="a") as f:
-            f.write(f"{self.num_updated}th in_RetraceQ: {torch.mean(in_Retraced_Q)}, ex_RetraceQ: {torch.mean(ex_Retraced_Q)}, in_online_Q: {torch.mean(in_online_Q)}, ex_online_Q: {torch.mean(ex_online_Q)}\n")
 
         self.in_q_optimizer.zero_grad()
         
         in_q_loss = F.mse_loss(weights*in_online_Q, weights*in_Retraced_Q)
         in_q_loss.backward(retain_graph=True)
         
-        clip_grad_norm_(self.in_online_q_network.parameters(), 40.0)
+        clip_grad_norm_(self.in_online_q_network.parameters(), self.in_q_clip_grad)
         self.in_q_optimizer.step()
 
         self.ex_q_optimizer.zero_grad()
@@ -271,7 +334,7 @@ class Learner:
         ex_q_loss = F.mse_loss(weights*ex_online_Q, weights*ex_Retraced_Q)
         ex_q_loss.backward(retain_graph=True)
         
-        clip_grad_norm_(self.ex_online_q_network.parameters(), 40.0)
+        clip_grad_norm_(self.ex_online_q_network.parameters(), self.ex_q_clip_grad)
         self.ex_q_optimizer.step()
 
         in_td_errors = in_Retraced_Q - in_online_Q
@@ -279,7 +342,7 @@ class Learner:
 
         in_priorities = self.eta * torch.max(torch.abs(in_td_errors), dim=0).values + (1 - self.eta) * torch.mean(torch.abs(in_td_errors), dim=0)
         ex_priorities = self.eta * torch.max(torch.abs(ex_td_errors), dim=0).values + (1 - self.eta) * torch.mean(torch.abs(ex_td_errors), dim=0)
-        priorities = in_priorities + ex_priorities + 0.001
+        priorities = in_priorities + ex_priorities
 
         self.num_updated += 1
         if self.num_updated % self.target_update_period == 0:
@@ -289,6 +352,13 @@ class Learner:
         return priorities, in_q_loss, ex_q_loss
 
     def get_qvalues(self, q_network, h, c):
+        """
+        get qvalues from specific q network
+        Args:
+          q_network
+          h (torch.tensor)
+          c (torch.tensor)
+        """
         
         for t in range(self.burnin_len):
             
@@ -373,7 +443,7 @@ class Learner:
             self.embedding_optimizer.zero_grad()
             loss.backward(retain_graph=True)
             
-            clip_grad_norm_(self.embedding_net.parameters(), 40.0)
+            clip_grad_norm_(self.embedding_net.parameters(), self.embed_clip_grad)
             self.embedding_optimizer.step()
             
             embed_loss.append(loss.cpu().detach().numpy())
@@ -386,10 +456,12 @@ class Learner:
             original_output = self.original_lifelong_net(self.states[t])
             
             loss = F.mse_loss(trained_output, original_output)
+            with open(f"log/lifelong_loss.txt", mode="a") as f:
+                f.write(f"Cycle: {self.num_updated}, Loss: {loss}\n")
             self.lifelong_optimizer.zero_grad()
             loss.backward(retain_graph=True)
             
-            clip_grad_norm_(self.trained_lifelong_net.parameters(), 40.0)
+            clip_grad_norm_(self.trained_lifelong_net.parameters(), self.lifelong_clip_grad)
             self.lifelong_optimizer.step()
             lifelong_loss.append(loss.cpu().detach().numpy())
 

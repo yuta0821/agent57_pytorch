@@ -5,14 +5,14 @@ import torch.nn.functional as F
 
 # Convolutional Encording
 class ConvEncoder(nn.Module):
-    def __init__(self, units):
+    def __init__(self, units, n_frames, hidden_list=[32, 64, 64], kernel_list=[8, 4, 3], stride_list=[4, 2, 1], flatten_dim=3136):
         super(ConvEncoder, self).__init__()
         
-        self.conv1 = nn.Conv2d(4, 32, 8, stride=4)
-        self.conv2 = nn.Conv2d(32, 64, 4, stride=2)
-        self.conv3 = nn.Conv2d(64, 64, 3, stride=1)
+        self.conv1 = nn.Conv2d(n_frames, hidden_list[0], kernel_list[0], stride=stride_list[0])
+        self.conv2 = nn.Conv2d(hidden_list[0], hidden_list[1], kernel_list[1], stride=stride_list[1])
+        self.conv3 = nn.Conv2d(hidden_list[1], hidden_list[2], kernel_list[2], stride=stride_list[2])
         self.flatten = nn.Flatten()
-        self.fc = nn.Linear(3136, units)
+        self.fc = nn.Linear(flatten_dim, units)
 
     def forward(self, x):
         
@@ -25,13 +25,13 @@ class ConvEncoder(nn.Module):
 
 # intrinsic or extrinsic QNetwork
 class QNetwork(nn.Module):
-    def __init__(self, action_space, hidden=512, units=512, num_arms=32):
+    def __init__(self, action_space, n_frames, hidden=512, units=512, num_arms=32):
         super(QNetwork, self).__init__()
         
         self.action_space = action_space
         self.num_arms = num_arms
 
-        self.conv_encoder = ConvEncoder(units)
+        self.conv_encoder = ConvEncoder(units, n_frames)
         self.lstm = nn.LSTM(input_size=units+self.action_space+self.num_arms+2,
                             hidden_size=hidden,
                             batch_first=False)
@@ -77,10 +77,10 @@ class QNetwork(nn.Module):
 
 
 class EmbeddingNet(nn.Module):
-    def __init__(self, units=32):
+    def __init__(self, n_frames, units=32):
         super(EmbeddingNet, self).__init__()
         
-        self.conv_encoder = ConvEncoder(units)
+        self.conv_encoder = ConvEncoder(units, n_frames)
 
     def forward(self, inputs):
         """
@@ -116,10 +116,10 @@ class EmbeddingClassifer(nn.Module):
 
 
 class LifeLongNet(nn.Module):
-    def __init__(self, units=128):
+    def __init__(self, n_frames, units=128):
         super(LifeLongNet, self).__init__()
         
-        self.conv_encoder = ConvEncoder(units)
+        self.conv_encoder = ConvEncoder(units, n_frames)
 
     def forward(self, inputs):
         """

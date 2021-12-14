@@ -34,7 +34,15 @@ def main(args):
                              num_arms=args.num_arms,
                              lamda=args.lamda,
                              burnin_length=args.burnin_length,
-                             unroll_length=args.unroll_length)
+                             unroll_length=args.unroll_length,
+                             in_q_lr=args.in_q_lr,
+                             ex_q_lr=args.ex_q_lr,
+                             embed_lr=args.embed_lr,
+                             lifelong_lr=args.lifelong_lr,
+                             in_q_clip_grad=args.in_q_clip_grad,
+                             ex_q_clip_grad=args.ex_q_clip_grad,
+                             embed_clip_grad=args.embed_clip_grad,
+                             lifelong_clip_grad=args.lifelong_clip_grad)
     
     in_q_weight, ex_q_weight, embed_weight, trained_lifelong_weight, original_lifelong_weight = ray.get(learner.define_network.remote())
     
@@ -52,6 +60,7 @@ def main(args):
                            eta=args.eta,
                            lamda=args.lamda,
                            agent_update_period=args.agent_update_period,
+                           num_rollout=args.num_rollout,
                            num_arms=args.num_arms,
                            k=args.k,
                            L=args.L,
@@ -73,6 +82,7 @@ def main(args):
                            window_size=args.window_size,
                            ucb_epsilon=args.ucb_epsilon,
                            ucb_beta=args.ucb_beta,
+                           switch_test_cycle=args.switch_test_cycle,
                            original_lifelong_weight=original_lifelong_weight)
 
     wip_agents = [agent.sync_weights_and_rollout.remote(in_q_weight=in_q_weight,
@@ -81,7 +91,7 @@ def main(args):
                                                         lifelong_weight=trained_lifelong_weight)
                  for agent in agents]
 
-    for i in range(16):
+    for i in range(args.n_agent_burnin):
         s = time.time()
         
         # 次の準備できてる（前の行動が終わった）Agent, 稼働中のAgent
@@ -110,7 +120,7 @@ def main(args):
     n_segment_added = 0
     s = time.time()
 
-    while learner_cycles <= 5000:
+    while learner_cycles <= args.n_learner_cycle:
         agent_cycles += 1
         s = time.time()
         
@@ -122,8 +132,6 @@ def main(args):
                                                                        ex_q_weight=ex_q_weight,
                                                                        embed_weight=embed_weight,
                                                                        lifelong_weight=trained_lifelong_weight)])
-        with open(f"log/agent_time_check.txt", mode="a") as f:
-            f.write(f"{agent_cycles}th Agent's time[sec]: {time.time() - s:.5f}\n")
             
         n_segment_added += len(segments)
 
@@ -143,26 +151,25 @@ def main(args):
             trained_lifelong_weight = ray.put(trained_lifelong_weight)
 
             with open(f"log/loss_history.txt", mode="a") as f:
-                f.write(f"{learner_cycles}th results => Agent cycle: {agent_cycles}, Added: {n_segment_added}, InQLoss: {in_q_loss:.4f}, ExQLoss: {ex_q_loss:.4f}, EmbeddingLoss: {embed_loss:.4f}, LifeLongLoss: {lifelong_loss:.4f}, Elapsed time[sec]: {time.time() - s:.5f}\n")
+                f.write(f"{learner_cycles}th results => Agent cycle: {agent_cycles}, Added: {n_segment_added}, InQLoss: {in_q_loss:.4f}, ExQLoss: {ex_q_loss:.4f}, EmbeddingLoss: {embed_loss:.4f}, LifeLongLoss: {lifelong_loss:.8f} \n")
 
             in_q_loss_history.append((learner_cycles-1, in_q_loss))
             ex_q_loss_history.append((learner_cycles-1, ex_q_loss))
             embed_loss_history.append((learner_cycles-1, embed_loss))
             lifelong_loss_history.append((learner_cycles-1, lifelong_loss))
 
-            test_s = time.time()
             test_score = ray.get(wip_tester)
             if test_score is not None:
-                score_history.append((learner_cycles-10, test_score))
+                score_history.append((learner_cycles-args.switch_test_cycle, test_score))
                 with open(f"log/score_history.txt", mode="a") as f:
-                    f.write(f"Cycle: {learner_cycles}, Score: {test_score}, Tester's time[sec]: {time.time() - test_s:.5f}\n")
+                    f.write(f"Cycle: {learner_cycles}, Score: {test_score}\n")
                     
             wip_tester = tester.test_play.remote(in_q_weight=in_q_weight,
                                                  ex_q_weight=ex_q_weight,
                                                  embed_weight=embed_weight,
                                                  lifelong_weight=trained_lifelong_weight)
 
-            if learner_cycles % 100 == 0:
+            if learner_cycles % args.freq_weight_save == 0:
                 learner.save.remote(weight_dir, learner_cycles)
 
             learner_cycles += 1
@@ -211,27 +218,47 @@ def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Agent57')
+    # Agent
     parser.add_argument('--num_agents', default=16, type=int)
+    parser.add_argument('--agent_update_period', default=100, type=int)
+    parser.add_argument('--num_rollout', default=10, type=int)
+    parser.add_argument('--epsilon_l', default=0.4, type=float)
+    parser.add_argument('--alpha_l', default=8, type=int)
+    # Tester
+    parser.add_argument('--switch_test_cycle', default=10, type=int)
+    # Learner
+    parser.add_argument('--target_update_period', default=10, type=int)
+    parser.add_argument('--in_q_lr', default=1e-4, type=float)
+    parser.add_argument('--ex_q_lr', default=1e-4, type=float)
+    parser.add_argument('--embed_lr', default=5e-4, type=float)
+    parser.add_argument('--lifelong_lr', default=5e-4, type=float)
+    parser.add_argument('--in_q_clip_grad', default=40, type=float)
+    parser.add_argument('--ex_q_clip_grad', default=40, type=float)
+    parser.add_argument('--embed_clip_grad', default=40, type=float)
+    parser.add_argument('--lifelong_clip_grad', default=40, type=float)
+    # buffer
+    parser.add_argument('--buffer_size', default=2**16, type=int)
+    parser.add_argument('--weight_expo', default=0.0, type=float)
+    # UCB
+    parser.add_argument('--window_size', default=90, type=int)
+    parser.add_argument('--ucb_epsilon', default=0.5, type=float)
+    parser.add_argument('--ucb_beta', default=1.0, type=float)
+    # Intrinsic
     parser.add_argument('--k', default=10, type=int)
     parser.add_argument('--L', default=5, type=int)
     parser.add_argument('--num_arms', default=32, type=int)
-    parser.add_argument('--agent_update_period', default=150, type=int)
-    parser.add_argument('--target_update_period', default=1500, type=int)
-    parser.add_argument('--buffer_size', default=2**16, type=int)
-    parser.add_argument('--n_frames', default=4, type=int)
-    parser.add_argument('--seed', default=0, type=int)
-    parser.add_argument('--epsilon_l', default=0.4, type=float)
-    parser.add_argument('--alpha_l', default=8, type=int)
+    # Base
+    parser.add_argument('--seed', default=0, type=int)    
     parser.add_argument('--gamma', default=0.997, type=float)
     parser.add_argument('--eta', default=0.9, type=float)
+    parser.add_argument('--lamda', default=0.95, type=float)
+    parser.add_argument('--n_frames', default=4, type=int)
     parser.add_argument('--env_name', default="BreakoutDeterministic-v4")
     parser.add_argument('--batch_size', default=32, type=int)
     parser.add_argument('--update_iter', default=16, type=int)
     parser.add_argument('--burnin_length', default=40, type=int)
     parser.add_argument('--unroll_length', default=40, type=int)
-    parser.add_argument('--window_size', default=90, type=int)
-    parser.add_argument('--ucb_epsilon', default=0.5, type=float)
-    parser.add_argument('--ucb_beta', default=1.0, type=float)
-    parser.add_argument('--lamda', default=0.95, type=float)
-    parser.add_argument('--weight_expo', default=0.0, type=float)
+    parser.add_argument('--n_agent_burnin', default=16, type=int)
+    parser.add_argument('--n_learner_cycle', default=5000, type=int)
+    parser.add_argument('--freq_weight_save', default=100, type=int)
     main(parser.parse_args())

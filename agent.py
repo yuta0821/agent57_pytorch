@@ -1,4 +1,5 @@
 import pickle
+import collections
 
 import gym
 import lz4.frame as lz4f
@@ -28,6 +29,7 @@ class Agent:
                  k,
                  L,
                  agent_update_period,
+                 num_rollout,
                  window_size,
                  ucb_epsilon,
                  ucb_beta,
@@ -40,11 +42,11 @@ class Agent:
         self.frame_process_func = get_preprocess_func(self.env_name)
         self.n_frames = n_frames  
 
-        self.in_q_network = QNetwork(self.action_space)
-        self.ex_q_network = QNetwork(self.action_space)
-        self.embedding_net = EmbeddingNet()
-        self.original_lifelong_net = LifeLongNet()
-        self.trained_lifelong_net = LifeLongNet()
+        self.in_q_network = QNetwork(self.action_space, n_frames)
+        self.ex_q_network = QNetwork(self.action_space, n_frames)
+        self.embedding_net = EmbeddingNet(n_frames)
+        self.original_lifelong_net = LifeLongNet(n_frames)
+        self.trained_lifelong_net = LifeLongNet(n_frames)
 
         self.ucb = UCB(num_arms, window_size, ucb_epsilon, ucb_beta)
         self.betas = create_beta_list(num_arms)
@@ -58,9 +60,11 @@ class Agent:
         self.unroll_len = unroll_length
         
         self.k = k
-        self.error_list = []
+        self.error_list = collections.deque(maxlen=int(1e4))
         self.L = L
+        
         self.agent_update_period = agent_update_period
+        self.num_rollout = num_rollout
         
         self.original_lifelong_net.load_state_dict(original_lifelong_weight)
         
@@ -76,7 +80,7 @@ class Agent:
 
         # rollout 10steps
         priorities, segments = [], []
-        while len(segments) < 10:
+        while len(segments) < self.num_rollout:
             _priorities, _segments = self._rollout()
             priorities += _priorities
             segments += _segments
@@ -199,8 +203,6 @@ class Agent:
 
         td_errors = rescaling(inverse_rescaling(Q) + P) - Q
         priorities = self.eta * torch.max(torch.abs(td_errors), dim=0).values + (1 - self.eta) * torch.mean(torch.abs(td_errors), dim=0)
-        with open(f"log/agent_check.txt", mode="a") as f:
-            f.write(f"priorites: {torch.mean(priorities)}, Q: {torch.mean(Q)}, next_maxQ: {torch.mean(next_maxQ)} \n")
         
         return  priorities
 
