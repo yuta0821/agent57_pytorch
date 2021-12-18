@@ -48,6 +48,7 @@ class Learner:
       burnin_length        (int): length of burnin to calculate qvalues
       unroll_length        (int): length of unroll to calculate qvalues
       target_update_period (int): how often to update the target parameters
+      num_updates          (int): number of times to be updated
     """
 
     def __init__(self,
@@ -231,7 +232,9 @@ class Learner:
         """
         update parameter of networks, generating losses.
         Args:
-            minibatch: minibatch of indices, weights and segments
+          minibatch: minibatch of indices, weights and segments
+        Returns:
+          weight and loss
         """
 
         indices_all = []
@@ -353,11 +356,13 @@ class Learner:
 
     def get_qvalues(self, q_network, h, c):
         """
-        get qvalues from specific q network
+        get qvalues from expeiences using specific q network
         Args:
-          q_network
-          h (torch.tensor)
-          c (torch.tensor)
+          q_network             : network to get Q values
+          h       (torch.tensor): LSTM hidden state
+          c       (torch.tensor): LSTM cell state
+        Returns:
+          qvalues (torch.tensor): Q values [unroll_len+1, batch_size, action_space]
         """
         
         for t in range(self.burnin_len):
@@ -387,6 +392,12 @@ class Learner:
 
 
     def set_pi(self, ex_online_qvalues, in_online_qvalues):
+        """
+        set pi from argmax of online qvalues 
+        Args:
+          ex_online_qvalues (torch.tensor): extrinsic Q values from online Q network [unroll_len+1, batch_size, action_space]
+          in_online_qvalues (torch.tensor): intrinsic Q values from online Q network [unroll_len+1, batch_size, action_space]
+        """
         
         # (1, batch_size, 1)
         beta = torch.stack([self.betas[i] for i in self.j], dim=0)[None, :, None].to(self.device)
@@ -402,6 +413,14 @@ class Learner:
         
 
     def get_retraced_Q(self, target_qvalues, rewards):
+        """
+        implement retrace operation
+        Args:
+          target_qvalues (torch.tensor): Q values from target Q network [unroll_len+1, batch_size, action_space]
+          rewards        (torch.tensor): rewards from experiences [burnin_len+unroll_len, batch_size]
+        Returns:
+          Retraced_Q (torch.tensor): Q values after retrace operation [unroll_len, batch_size]
+        """
         
         # (unroll_len, batch_size)
         target_Q = torch.sum(target_qvalues[1:] * self.pi_onehot, dim=2)
@@ -429,6 +448,12 @@ class Learner:
         return Retraced_Q
 
     def ngu_update(self):
+        """
+        update embedding network and lifelong network
+        Returns:
+          np.mean(embed_loss)    (np.ndarray): average of embedding loss
+          np.mean(lifelong_loss) (np.ndarray): average of lifelong loss
+        """
 
         embed_loss = []
         self.embedding_net.train()

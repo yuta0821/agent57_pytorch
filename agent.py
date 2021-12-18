@@ -16,6 +16,37 @@ from utils import (UCB, create_beta_list, create_gamma_list,
 
 @ray.remote(num_cpus=1)
 class Agent:
+    """
+    collect experiments and get initial priority
+    Attributes:
+      pid                 (int): unique id of each agent
+      env_name            (str): name of environment
+      n_frames            (int): number of images to be stacked
+      env          (gym object): environment
+      action_space        (int): dim of action space
+      frame_process_func       : function to preprocess images
+      in_q_network             : q network about intrinsic reward
+      ex_q_network             : q network about extrinsic reward
+      embedding_net            : embedding network to get episodic reward
+      embedding_classifier     : classify action based on embedding representation
+      original_lifelong_net    : lifelong network not to be trained
+      trained_lifelong_net     : lifelong network to be trained
+      ucb                      : object of UCB class which solve a multi-armed bandit problem
+      betas              (list): list of beta which decide weights between intrinsic qvalues and extrinsic qvalues
+      gammas             (list): list of gamma which is discount rate
+      epsilon           (float): coefficient for epsilon greedy
+      eta               (float): coefficient for priority caluclation
+      lamda             (float): coefficient for retrace operation
+      burnin_length       (int): length of burnin to calculate qvalues
+      unroll_length       (int): length of unroll to calculate qvalues
+      k                   (int): number of neighbors referenced when calculating episode reward
+      L                   (int): upper limit of curiosity
+      error_list               : list of errors to be accommodated when calculating lifelong reward
+      agent_update_period (int): how often to update the target parameters
+      num_rollout         (int): minimum segments to be got
+      num_updates         (int): number of times to be updated
+    """
+
     def __init__(self,
                  pid,
                  env_name,
@@ -23,17 +54,37 @@ class Agent:
                  epsilon,
                  eta,
                  lamda,
-                 num_arms,
                  burnin_length,
                  unroll_length,
                  k,
                  L,
                  agent_update_period,
                  num_rollout,
+                 num_arms,
                  window_size,
                  ucb_epsilon,
                  ucb_beta,
                  original_lifelong_weight):
+        """
+        Args:
+          pid                 (int): unique id of each agent
+          env_name            (str): name of environment
+          n_frames            (int): number of images to be stacked
+          epsilon           (float): coefficient for epsilon soft-max
+          eta               (float): coefficient for priority caluclation
+          lamda             (float): coefficient for retrace operation
+          burnin_length       (int): length of burnin to calculate qvalues
+          unroll_length       (int): length of unroll to calculate qvalues
+          k                   (int): number of neighbors referenced when calculating episode reward
+          L                   (int): upper limit of curiosity
+          agent_update_period (int): how often to update the target parameters
+          num_rollout         (int): minimum segments to be got
+          num_arms            (int): number of arms used in multi-armed bandit problem
+          window_size         (int): size of window used in multi-armed bandit problem
+          ucb_epsilon       (float): probability to select randomly used in multi-armed bandit problem
+          ucb_beta          (float): weight between frequency and mean reward
+          original_lifelong_weight : original weight of lifelong network 
+        """
         
         self.pid = pid
         self.env_name = env_name
@@ -71,6 +122,18 @@ class Agent:
         self.num_updates = 0
 
     def sync_weights_and_rollout(self, in_q_weight, ex_q_weight, embed_weight, lifelong_weight):
+        """
+        load weight and run rollout
+        Args:
+          in_q_weight     : weight of intrinsic q network
+          ex_q_weight     : weight of extrinsic q network
+          embed_weight    : weight of embedding network
+          lifelong_weight : weight of lifelong network
+        Returns:
+          priority  (list): priority of segments when pulling segments from sum tree
+          segments        : parts of expecimences
+          self.pid        : unique id of each agent
+        """
 
         if self.num_updates % self.agent_update_period == 0:
             self.in_q_network.load_state_dict(in_q_weight)
@@ -78,7 +141,6 @@ class Agent:
             self.embedding_net.load_state_dict(embed_weight)
             self.trained_lifelong_net.load_state_dict(lifelong_weight)
 
-        # rollout 10steps
         priorities, segments = [], []
         while len(segments) < self.num_rollout:
             _priorities, _segments = self._rollout()
@@ -90,6 +152,12 @@ class Agent:
     
 
     def _rollout(self):
+        """
+        get priority and segments from collected experiments
+        Returns:
+          priorities    (list): priorities of segments when pulling segments from sum tree
+          compressed_segments : compressed segments in terms of  memory capacity
+        """
         
         # get index from ucb
         j = self.ucb.pull_index()
@@ -120,7 +188,6 @@ class Agent:
         for transition in transitions:
             episode_buffer.add(transition)
 
-        # 初期優先度の計算 batch_sizeはsegmentsの長さによる
         segments = episode_buffer.pull_segments()
         
         self.states, self.actions, self.in_rewards, self.ex_rewards, self.dones, self.j, self.next_states, \
@@ -138,8 +205,8 @@ class Agent:
         # (unroll_len, batch_size, action_space)
         self.actions_onehot = F.one_hot(self.actions[self.burnin_len:], num_classes=self.action_space)
 
-        in_priorities = self.get_priorites(in_qvalues, self.in_rewards)
-        ex_priorities = self.get_priorites(ex_qvalues, self.ex_rewards)
+        in_priorities = self.get_priorities(in_qvalues, self.in_rewards)
+        ex_priorities = self.get_priorities(ex_qvalues, self.ex_rewards)
 
         priorities = in_priorities + ex_priorities
         compressed_segments = [lz4f.compress(pickle.dumps(seg)) for seg in segments]
@@ -147,6 +214,15 @@ class Agent:
         return priorities.detach().numpy().tolist(), compressed_segments
 
     def get_qvalues(self, q_network, h, c):
+        """
+        get qvalues from expeiences using q network
+        Args:
+          q_network             : network to get Q values
+          h       (torch.tensor): LSTM hidden state
+          c       (torch.tensor): LSTM cell state
+        Returns:
+          qvalues (torch.tensor): Q values [unroll_len+1, batch_size, action_space]
+        """
         
         for t in range(self.burnin_len):
             _, (h, c) = q_network(self.states[t],
@@ -173,7 +249,15 @@ class Agent:
         
         return qvalues
 
-    def get_priorites(self, qvalues, rewards):
+    def get_priorities(self, qvalues, rewards):
+        """
+        get priorities from q values and rewards
+        Args:
+          qvalues        (torch.tensor): Q values from Q network [unroll_len+1, batch_size, action_space]
+          rewards        (torch.tensor): rewards from experiences [burnin_len+unroll_len, batch_size]
+        Returns:
+          priority       (torch.tensor): priority calculate based on td errors
+        """
         
         # (unroll_len, batch_size)
         Q = torch.sum(qvalues[:-1] * self.actions_onehot, dim=2)
