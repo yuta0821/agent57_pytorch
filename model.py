@@ -5,8 +5,21 @@ import torch.nn.functional as F
 
 # Convolutional Encording
 class ConvEncoder(nn.Module):
+    """
+    Encoder with convolution
+    Attributes:
+      conv1   : first convolutional layer
+      conv2   : second convolutional layer 
+      conv3   : third convolutional layer
+      flatten : for tensor to be flatten
+      fc      : full connected layer
+    """
     def __init__(self, units, n_frames, hidden_list=[32, 64, 64], kernel_list=[8, 4, 3], stride_list=[4, 2, 1], flatten_dim=3136):
         super(ConvEncoder, self).__init__()
+        """
+        units    (int): dim of output
+        n_frames (int): dim of input
+        """
         
         self.conv1 = nn.Conv2d(n_frames, hidden_list[0], kernel_list[0], stride=stride_list[0])
         self.conv2 = nn.Conv2d(hidden_list[0], hidden_list[1], kernel_list[1], stride=stride_list[1])
@@ -15,6 +28,12 @@ class ConvEncoder(nn.Module):
         self.fc = nn.Linear(flatten_dim, units)
 
     def forward(self, x):
+        """
+        Args:
+          x (torch.tensor): input [b, n_frames, 84, 84]
+        Returns
+          x (torch.tensor): ouput [b, units]
+        """
         
         x = F.relu(self.conv1(x))  # (b, 32, 20, 20)
         x = F.relu(self.conv2(x))  # (b, 64, 9, 9)
@@ -25,8 +44,23 @@ class ConvEncoder(nn.Module):
 
 # intrinsic or extrinsic QNetwork
 class QNetwork(nn.Module):
+    """
+    Attributes:
+      action_space (int): dim of action space
+      num_arms     (int): number of arms used in multi-armed bandit problem
+      conv_encoder      : convolutional encoder
+      lstm              : LSTM layer
+      fc                : fully connected layer
+      fc_adv            : fully connected layer to get advantage
+      fc_v              : fully connected layer to get value
+    """
     def __init__(self, action_space, n_frames, hidden=512, units=512, num_arms=32):
         super(QNetwork, self).__init__()
+        """
+        Args:
+          action_space (int): dim of action space
+          n_frames     (int): number of images to be stacked
+        """
         
         self.action_space = action_space
         self.num_arms = num_arms
@@ -43,8 +77,8 @@ class QNetwork(nn.Module):
     def forward(self, input, states, prev_action, prev_in_rewards, prev_ex_rewards, j):
         """
         Args:
-          input (torch.tensor): state [b, n_frames, 84, 84]
-          prev_action (torch.tensor): previous action [b]
+          input           (torch.tensor): state [b, n_frames, 84, 84]
+          prev_action     (torch.tensor): previous action [b]
           prev_in_rewards (torch.tensor): previous intrinsic reward [b]
           prev_ex_rewards (torch.tensor): previous extrinsic reward [b]
         """
@@ -77,8 +111,16 @@ class QNetwork(nn.Module):
 
 
 class EmbeddingNet(nn.Module):
+    """
+    Attributes
+      conv_encoder : convolutional encoder
+    """
     def __init__(self, n_frames, units=32):
         super(EmbeddingNet, self).__init__()
+        """
+        Args:
+          n_frames (int): number of images to be stacked
+        """
         
         self.conv_encoder = ConvEncoder(units, n_frames)
 
@@ -94,8 +136,17 @@ class EmbeddingNet(nn.Module):
 
 
 class EmbeddingClassifer(nn.Module):
+    """
+    Attributes:
+      fc1 : fully connected layer
+      fc2 : fully connected layer to get action probability
+    """
     def __init__(self, action_space, hidden=128):
         super(EmbeddingClassifer, self).__init__()
+        """
+        Args:
+          action_space (int): dim of action space
+        """
         
         self.fc1 = nn.Linear(64, hidden)
         self.fc2 = nn.Linear(hidden, action_space)
@@ -116,8 +167,16 @@ class EmbeddingClassifer(nn.Module):
 
 
 class LifeLongNet(nn.Module):
+    """
+    Attributes
+      conv_encoder : convolutional encoder
+    """
     def __init__(self, n_frames, units=128):
         super(LifeLongNet, self).__init__()
+        """
+        Args:
+          n_frames (int): number of images to be stacked
+        """
         
         self.conv_encoder = ConvEncoder(units, n_frames)
 
