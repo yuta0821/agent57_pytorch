@@ -89,12 +89,12 @@ def main(args):
                                                         ex_q_weight=ex_q_weight,
                                                         embed_weight=embed_weight,
                                                         lifelong_weight=trained_lifelong_weight)
-                 for agent in agents]
+                  for agent in agents]
 
     for i in range(args.n_agent_burnin):
         s = time.time()
         
-        # 次の準備できてる（前の行動が終わった）Agent, 稼働中のAgent
+        # finised agent, working agents
         finished, wip_agents = ray.wait(wip_agents, num_returns=1)
         priorities, segments, pid = ray.get(finished[0])
         
@@ -137,7 +137,7 @@ def main(args):
 
         finished_learner, _ = ray.wait([wip_learner], timeout=0)
 
-        if finished_learner:  # networkの更新が終わっていたら
+        if finished_learner:
             in_q_weight, ex_q_weight, embed_weight, trained_lifelong_weight, indices, priorities, in_q_loss, ex_q_loss, embed_loss, lifelong_loss = ray.get(finished_learner[0])
             
             replay_buffer.update_priority(indices, priorities)

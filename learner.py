@@ -347,6 +347,7 @@ class Learner:
         ex_priorities = self.eta * torch.max(torch.abs(ex_td_errors), dim=0).values + (1 - self.eta) * torch.mean(torch.abs(ex_td_errors), dim=0)
         priorities = in_priorities + ex_priorities
 
+        # copy online q network parameter to target q network
         self.num_updated += 1
         if self.num_updated % self.target_update_period == 0:
             self.in_target_q_network.load_state_dict(self.in_online_q_network.state_dict())

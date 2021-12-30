@@ -9,8 +9,8 @@ from PIL import Image
 
 def rescaling(x):
     """
-    https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
     rescaling function
+    https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L180
     Args:
       x (torch.tensor): input
     Returns:
@@ -23,8 +23,8 @@ def rescaling(x):
 
 def inverse_rescaling(x):
     """
-    https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L186
     inverse rescaling function
+    https://github.com/google-research/seed_rl/blob/f53c5be4ea083783fb10bdf26f11c3a80974fa03/agents/r2d2/learner.py#L186
     Args:
       x (torch.tensor): input
     Returns:
@@ -156,7 +156,7 @@ class UCB:
     Attributes:
       data           : list that stores the index and average reward of the arms
       num_arms  (int): number of arms used in multi-armed bandit problem
-      epsilon (float): probability to select randomly used in multi-armed bandit problem
+      epsilon (float): probability to select the index of the arms used in multi-armed bandit problem
       beta    (float): weight between frequency and mean reward
       count     (int): if count is less than num_arms, index is count because of trying to pick every arm at least once
     """
@@ -165,7 +165,7 @@ class UCB:
         """
         num_arms    (int): number of arms used in multi-armed bandit problem
         window_size (int): size of window used in multi-armed bandit problem
-        epsilon   (float): probability to select randomly used in multi-armed bandit problem
+        epsilon   (float): probability to select the index of the arms used in multi-armed bandit problem
         beta      (float): weight between frequency and mean reward
         """
         
@@ -408,7 +408,7 @@ def segments2contents(segments, burnin_len, is_grad=False, device=torch.device("
     convert segments to contents
     Args:
       segments        : a coherent body of experience of some length
-      burnin_len (int): length of burnin to calculate qvalues
+      burnin_len (int): burnin length to calculate qvalues
     Returns:
       each content
     """

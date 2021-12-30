@@ -19,7 +19,7 @@ class Agent:
     """
     collect experiments and get initial priority
     Attributes:
-      pid                 (int): unique id of each agent
+      pid                 (int): process id
       env_name            (str): name of environment
       n_frames            (int): number of images to be stacked
       env          (gym object): environment
@@ -67,7 +67,7 @@ class Agent:
                  original_lifelong_weight):
         """
         Args:
-          pid                 (int): unique id of each agent
+          pid                 (int): process id
           env_name            (str): name of environment
           n_frames            (int): number of images to be stacked
           epsilon           (float): coefficient for epsilon soft-max
@@ -132,7 +132,7 @@ class Agent:
         Returns:
           priority  (list): priority of segments when pulling segments from sum tree
           segments        : parts of expecimences
-          self.pid        : unique id of each agent
+          self.pid        : process id
         """
 
         if self.num_updates % self.agent_update_period == 0:

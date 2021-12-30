@@ -15,21 +15,47 @@ Segment = collections.namedtuple("Segment",
 
 
 class EpisodeBuffer:
+    """
+    Attributes
+      transitions [list]: list to store experiments
+      burnin_len   [int]: length of burnin to calculate qvalues
+      unroll_len   [int]: length of unroll to calculate qvalues
+    """
+
     def __init__(self, burnin_length, unroll_length):
+        """
+        Args:
+          burnin_len [int]: length of burnin to calculate qvalues
+          unroll_len [int]: length of unroll to calculate qvalues
+        """
         
         self.transitions = []
         self.burnin_len = burnin_length
         self.unroll_len = unroll_length
 
     def __len__(self):
+        """
+        set length
+        """
+
         return len(self.transitions)
 
     def add(self, transition):
+        """
+        add transition (experience) to transitions
+        Args:
+          transition : experience collected by multi agents
+        """
         
         transition = Transition(*transition)
         self.transitions.append(transition)
 
     def pull_segments(self):
+        """
+        generate segments from transitions
+        Returns
+          segments [list]: group of continues experiences
+        """
         
         segments = []
 
@@ -59,7 +85,24 @@ class EpisodeBuffer:
 
 
 class SegmentReplayBuffer:
+    """
+    Attributes
+      buffer_size     [int]: size of buffer
+      priorities           : SumTree object to determine priority
+      segment_buffer [list]: buffer of segment which size is buffer_size
+      weight_expo   [float]: exponetial value to smooth weights
+      eta [float]          : coefficient for reduce priority
+      count [int]          : index of priorities list
+      full [bool]          : flag whether segment buffer is full or not
+    """
+
     def __init__(self, buffer_size, weight_expo, eta=0.9):
+        """
+        Args
+          buffer_size    [int]: size of buffer
+          weight_expo  [float]: exponetial value to smooth weights
+          eta [float, Optical]: coefficient for reduce priority
+        """
         
         self.buffer_size = buffer_size
         self.priorities = SumTree(capacity=self.buffer_size)
@@ -71,9 +114,19 @@ class SegmentReplayBuffer:
         self.full = False
 
     def __len__(self):
+        """
+        set length
+        """
+
         return len(self.segment_buffer) if self.full else self.count
 
     def add(self, priorities, segments):
+        """
+        add segment and priority to segment buffer
+        Args:
+          priorities [list]: list of priority, how much computed loss using the segment is 
+          segments   [list]: group of continues experiences
+        """
         
         assert len(priorities) == len(segments)
 
@@ -87,24 +140,39 @@ class SegmentReplayBuffer:
                 self.full = True
 
     def update_priority(self, sampled_indices, priorities):
+        """
+        update priority which is selected as a part of minibatch        
+        Args:
+          sampled_indices [list]: indices of segments which were selected as minibatch
+          priorities      [list]: list of priority, how much computed loss using the segment is 
+        """
         assert len(sampled_indices) == len(priorities)
 
         for idx, priority in zip(sampled_indices, priorities):
             self.priorities[idx] = priority ** self.eta
 
     def sample_minibatch(self, batch_size):
+        """
+        sample minibatch according to priorities
+        Args:
+          batch_size [int]: size of minibatch
+        Returns:
+          sampled_indices  [list]: indices of experiences
+          sampled_weights  [list]: priorities of experiences
+          sampled_segments [list]: a coherent body of experience of some length
+        """
         
         sampled_indices = [self.priorities.sample() for _ in range(batch_size)]
 
-        weights = []
+        sampled_weights = []
         current_size = len(self.segment_buffer) if self.full else self.count
         
         for idx in sampled_indices:
             prob = self.priorities[idx] / self.priorities.sum()
-            weight = (prob * current_size)**(-self.weight_expo)
-            weights.append(weight)
+            sampled_weight = (prob * current_size)**(-self.weight_expo)
+            sampled_weights.append(sampled_weight)
             
-        weights = np.array(weights) / max(weights)
+        sampled_weights = np.array(sampled_weights) / max(sampled_weights)
         sampled_segments = [self.segment_buffer[idx] for idx in sampled_indices]
         
-        return sampled_indices, weights, sampled_segments
+        return sampled_indices, sampled_weights, sampled_segments
