@@ -58,4 +58,5 @@ python main.py
 
 # Citation
 Agent57: Outperforming the Atari Human Benchmark
+
 https://arxiv.org/abs/2003.13350
