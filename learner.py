@@ -372,7 +372,7 @@ class Learner:
                                   states=(h, c),
                                   prev_action=self.prev_actions[t],
                                   j=self.j,
-                                  prev_in_rewards=self.prev_in_rewards[t], # NOTE: segment定義でshape合わせることは無理？
+                                  prev_in_rewards=self.prev_in_rewards[t],
                                   prev_ex_rewards=self.prev_ex_rewards[t])
 
         qvalues = []

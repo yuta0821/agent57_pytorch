@@ -2,11 +2,19 @@ import random
 
 
 class SumTree:
-    """ See https://github.com/ray-project/ray/blob/master/rllib/execution/segment_tree.py
+    """
+    See https://github.com/ray-project/ray/blob/master/rllib/execution/segment_tree.py
+    Attributes
+      capacity [int]: capacity of sum tree
+      values  [list]: list to store priority
     """
 
     def __init__(self, capacity: int):
-        #: 2のべき乗チェック
+        """
+        Args
+          capacity [int]: capacity of sum tree
+        """
+        
         assert capacity & (capacity - 1) == 0
         self.capacity = capacity
         self.values = [0 for _ in range(2 * capacity)]
@@ -15,6 +23,7 @@ class SumTree:
         return str(self.values[self.capacity:])
 
     def __setitem__(self, idx, val):
+        
         idx = idx + self.capacity
         self.values[idx] = val
 
@@ -27,6 +36,7 @@ class SumTree:
             current_idx //= 2
 
     def __getitem__(self, idx):
+        
         idx = idx + self.capacity
         return self.values[idx]
 
@@ -34,6 +44,12 @@ class SumTree:
         return self.values[1]
 
     def sample(self):
+        """
+        sample index according to values
+        Returns
+          idx [int]: selected index
+        """
+        
         z = random.uniform(0, self.sum())
         try:
             assert 0 <= z <= self.sum(), z
@@ -48,13 +64,11 @@ class SumTree:
             idx_lchild = 2 * current_idx
             idx_rchild = 2 * current_idx + 1
 
-            #: 左子ノードよりzが大きい場合は右子ノードへ
             if z > self.values[idx_lchild]:
                 current_idx = idx_rchild
                 z = z - self.values[idx_lchild]
             else:
                 current_idx = idx_lchild
 
-        #: 見かけ上のインデックスにもどす
         idx = current_idx - self.capacity
         return idx
